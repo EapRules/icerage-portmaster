@@ -286,15 +286,36 @@ int bionic_pthread_mutex_init(BIONIC_pthread_mutex_t *m, pthread_mutexattr_t **a
     if (!m)
         return EINVAL;
 
-    /* Re-initialising over a mutex we already materialised would leak it.
-     * POSIX calls that undefined behaviour anyway, so the old one is simply
-     * reclaimed rather than left behind. */
-    if ((uintptr_t)m->real_mtx > kBionicInitWordMax) {
-        pthread_mutex_destroy(m->real_mtx);
-        free(m->real_mtx);
-        m->value = 0;
-    }
-
+    /*
+     * The incoming word is deliberately NOT looked at.
+     *
+     * An earlier version tried to be tidy here: if the word already held a
+     * pointer above kBionicInitWordMax it destroyed and freed that host mutex
+     * first, so re-initialising would not leak. That reasoning has a hole -
+     * it assumes the word means something on entry, and on a freshly
+     * malloc'd mutex it does not.
+     *
+     * Ice Rage allocates its mutexes with the engine's own allocator, which
+     * is plain memalign - no zeroing:
+     *
+     *     xt::FileWatcher::FileWatcher+0x7c   mov  r0, #4
+     *                                         bl   xt::MemoryManager::allocMemory
+     *                                         mov  r1, #0
+     *                                         bl   pthread_mutex_init@plt
+     *
+     * Those four bytes are whatever the previous owner of the chunk left
+     * there - in practice a stale heap pointer, which sails past the
+     * kBionicInitWordMax test. The shim then called free() on a pointer that
+     * was never allocated as a mutex, and glibc aborted the process with
+     * "free(): invalid pointer" a few allocations later.
+     *
+     * Bionic itself never reads the word in pthread_mutex_init: the mutex is
+     * inline there, so initialising simply overwrites it. Matching that is
+     * both correct and the only safe option. Re-initialising an already
+     * initialised mutex is undefined behaviour in POSIX and neither the game
+     * nor bionic does it, so the leak this used to prevent cannot happen -
+     * and even if it did, a leaked 24-byte mutex beats a dead process.
+     */
     pthread_mutex_t *host = (pthread_mutex_t *)calloc(1, sizeof(*host));
     if (!host)
         return ENOMEM;
