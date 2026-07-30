@@ -65,8 +65,56 @@ static const char *signal_name(int sig)
     case SIGBUS:  return "SIGBUS";
     case SIGILL:  return "SIGILL";
     case SIGFPE:  return "SIGFPE";
+    case SIGABRT: return "SIGABRT";
     default:      return "signal";
     }
+}
+
+/*
+ * A return-address scan of the faulting stack.
+ *
+ * There is no unwinder here: the module was mapped by our own loader, so it is
+ * in no dl_iterate_phdr list and .ARM.exidx never gets registered. Frame
+ * pointers are out too - the game is built -fomit-frame-pointer like every
+ * NDK release.
+ *
+ * What is left is the crude method, and for this job it is enough: walk the
+ * stack word by word and print everything that points into the module's text.
+ * It reports call sites that already returned as well as live frames, so it is
+ * a list of suspects rather than a backtrace - but every real frame is in it,
+ * and that is what turns "SIGSEGV somewhere in the C++ runtime" into a
+ * specific engine function to disassemble.
+ *
+ * Thumb return addresses have bit 0 set; the offsets are printed with it
+ * cleared so they can be pasted straight into objdump --start-address.
+ */
+static void put_stack(uintptr_t sp)
+{
+    if (!sp || !g_text_size)
+        return;
+
+    put("       stack (module return addresses, innermost first):\n");
+
+    /* Bounded so a corrupted sp cannot walk off the mapping and fault us a
+     * second time inside the handler, where the report would be lost. */
+    const uintptr_t *w   = (const uintptr_t *)(sp & ~(uintptr_t)3);
+    const int        max = 1024;   /* 4 KiB of stack */
+    int              hits = 0;
+
+    for (int i = 0; i < max && hits < 24; i++) {
+        uintptr_t v = w[i];
+        if (v < g_text_base || v >= g_text_base + g_text_size)
+            continue;
+        put("         ");
+        put(g_soname);
+        put("+");
+        put_hex((v & ~(uintptr_t)1) - g_text_base);
+        put("\n");
+        hits++;
+    }
+
+    if (!hits)
+        put("         (none - the fault is not below any module frame)\n");
 }
 
 static void on_fault(int sig, siginfo_t *si, void *ucontext)
@@ -93,6 +141,9 @@ static void on_fault(int sig, siginfo_t *si, void *ucontext)
     put("       module text at ");
     put_hex(g_text_base);
     put("\n");
+
+    if (uc)
+        put_stack(uc->uc_mcontext.arm_sp);
 
     /* Die the way we would have died without this handler. */
     struct sigaction dfl;
@@ -121,4 +172,13 @@ extern "C" void crash_report_init(so_module *mod, const char *soname)
     sigaction(SIGBUS,  &sa, NULL);
     sigaction(SIGILL,  &sa, NULL);
     sigaction(SIGFPE,  &sa, NULL);
+
+    /*
+     * SIGABRT too. glibc's heap checks ("free(): invalid pointer",
+     * "malloc(): corrupted top size") abort() instead of faulting, and without
+     * this the process just dies with "uncaught target signal 6" and no clue
+     * about which module frame handed the bad pointer to free(). The stack
+     * scan below is exactly as useful there as it is for a SIGSEGV.
+     */
+    sigaction(SIGABRT, &sa, NULL);
 }
