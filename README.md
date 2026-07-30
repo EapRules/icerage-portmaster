@@ -193,8 +193,12 @@ the game draws anything.
 
 ## Known issues
 
-- **The music is silent.** It is a compressed stream the platform is expected to
-  decode, and this port has no decoder yet. Sound effects work.
+- The log carries a warning that **the music will be silent**. Ignore it: audio
+  works on the device, music included. The game asks OpenSL ES for a second
+  player fed a compressed stream that the platform is meant to decode, and this
+  port has no decoder for that path — but the game does not depend on it, and
+  decodes its own Ogg elsewhere. The warning describes that unused player, not
+  what you hear.
 - **The game asks for 1920x1080** on a 640x480 panel. It renders anyway, but the
   layout was not drawn for this aspect ratio. The port ships a 4:3 loading
   screen because the game's own is 16:9 and sat letterboxed.

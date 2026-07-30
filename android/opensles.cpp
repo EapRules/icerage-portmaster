@@ -881,26 +881,34 @@ static ABI_ATTR SLresult eng_CreateAudioPlayer(SLEngineItf self, SLObjectItf *pl
      * the game decodes its own Ogg Vorbis and hands us finished samples, so
      * those play for real.
      *
-     * The music arrives as SL_DATAFORMAT_MIME - a file the *platform* is
+     * The other kind arrives as SL_DATAFORMAT_MIME - a file the *platform* is
      * expected to decode, which on Android is Stagefright and here is nobody.
-     * This port has no Vorbis decoder yet, so that player is created but
-     * silent, and says so. Refusing instead is not an option: the game does
-     * not survive it. xt::SoundSystem::playMusic calls Channel::play()
-     * unconditionally, and Channel::play() dereferences the SLPlayItf it never
-     * got:
+     * That player is created but produces nothing. Refusing instead is not an
+     * option: the game does not survive it. xt::SoundSystem::playMusic calls
+     * Channel::play() unconditionally, and Channel::play() dereferences the
+     * SLPlayItf it never got:
      *
      *     ldr r0, [r0, #20]   ; channel->playItf, null if creation failed
      *     ldr r1, [r0]        ; <- SIGSEGV
+     *
+     * This used to announce "Music will be silent", and that claim went into a
+     * published release before anyone checked it against the device. It was
+     * wrong: music plays. The game does not depend on this player, and reaches
+     * its soundtrack through the PCM path like everything else. A message about
+     * an unused code path is not a statement about what the player hears, and
+     * writing it as though it were cost a correction in public.
      */
     const bool is_pcm = (pcm->formatType == SL_DATAFORMAT_PCM);
     if (!is_pcm) {
         static bool warned = false;
         if (!warned) {
             warned = true;
-            warning("OpenSL ES: the music is a compressed stream for the "
-                    "platform to decode (format %u) and this port has no "
-                    "decoder yet (milestone M6). Music will be silent; sound "
-                    "effects are unaffected.\n", (unsigned)pcm->formatType);
+            warning("OpenSL ES: a player was asked for with a compressed "
+                    "stream (format %u) for the platform to decode, and this "
+                    "port has no decoder for that path, so it stays empty. "
+                    "This is not the audio you hear: sound and music both go "
+                    "through the PCM path and are unaffected.\n",
+                    (unsigned)pcm->formatType);
         }
     }
 
