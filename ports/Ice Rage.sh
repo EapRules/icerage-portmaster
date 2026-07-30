@@ -57,8 +57,16 @@ cd "$GAMEDIR" || exit 1
 
 # Everything from here on lands in log.txt, which is the only diagnostic
 # anyone gets off the console.
+#
+# Written straight to the file rather than through `tee`. A pipe adds a second
+# process with its own buffer, and on a crash PortMaster's exit path pkills
+# everything before that buffer is flushed - so the log ends mid-sentence and
+# loses exactly the part naming the fault. That happened here: a reproducible
+# segfault produced a log with no FATAL block in it at all.
+#
+# The handheld has no visible terminal, so nothing is lost by not echoing.
 : > "$GAMEDIR/log.txt"
-exec > >(tee "$GAMEDIR/log.txt") 2>&1
+exec > "$GAMEDIR/log.txt" 2>&1
 
 export LD_LIBRARY_PATH="$GAMEDIR/libs.armhf:$LD_LIBRARY_PATH"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
@@ -94,7 +102,7 @@ if [ ! -f "$GAMEDIR/icerage.apk" ]; then
     echo "    $GAMEDIR/icerage.apk"
     echo ""
     echo "  It is the Android APK, package"
-    echo "  net.mountainsheep.iceragezombies"
+    echo "  net.mountainsheep.icerage"
     echo ""
     echo "  See README.md in the port folder."
     echo ""
@@ -145,7 +153,7 @@ if command -v unzip >/dev/null 2>&1; then
     - it is a split install, arm64 only
 
   You need the plain single APK of
-  net.mountainsheep.iceragezombies
+  net.mountainsheep.icerage
 
 EOF
     pm_finish
@@ -153,32 +161,33 @@ EOF
   fi
 
   # AndroidManifest.xml is binary XML holding its strings as UTF-16, so the
-  # version reads as "1.28" only once the padding bytes are gone. Reducing it
+  # version reads as "1.8" only once the padding bytes are gone. Reducing it
   # to printable characters does that and, just as importantly, stops grep from
   # treating the stream as binary - a binary match with -q reports nothing found
   # and the check would reject every APK, including the right one.
   if ! unzip -p "$GAMEDIR/icerage.apk" AndroidManifest.xml 2>/dev/null \
-       | LC_ALL=C tr -cd '[:print:]\n' | LC_ALL=C grep -q "1\.28"; then
-    echo "APK check: this does not look like version 1.28 - continuing anyway"
+       | LC_ALL=C tr -cd '[:print:]\n' | LC_ALL=C grep -q "net\.mountainsheep\.icerage"; then
+    echo "APK check: this does not look like net.mountainsheep.icerage - continuing anyway"
     show_screen 8 <<EOF
 
-  Ice Rage - unexpected APK version
+  Ice Rage - unexpected APK
 
-  This port was built against v1.28,
-  the last release (May 2017), and
-  your file does not look like it.
+  This port was built against the OUYA
+  release of net.mountainsheep.icerage
+  (v1.8, October 2013), and your file
+  does not look like it.
 
-  Repacked "MOD" APKs are the usual
-  reason and they generally do not
-  work: the game library is modified.
+  Other builds may still work, but the
+  Play version is touch-only and this
+  port drives the game as a controller.
 
   Starting anyway - if it crashes or
-  hangs, this is the first thing to
-  suspect.
+  the menus do not respond, this is the
+  first thing to suspect.
 
 EOF
   else
-    echo "APK check: version 1.28, native library present"
+    echo "APK check: net.mountainsheep.icerage, native library present"
   fi
 fi
 
@@ -215,9 +224,10 @@ fi
 # stays self-contained and uninstalls cleanly.
 export ICERAGE_DATA_DIR="$GAMEDIR/gamedata"
 
-# Drop a file in here to replace the APK asset of the same name. The game's
-# splash is 1280x720 and this panel is 640x480, so splash.jpg is the one worth
-# replacing: a 4:3 image fills the screen instead of sitting letterboxed.
+# Drop a file in here to replace the APK asset of the same name. The game's own
+# splash is 1920x1080 and this panel is 640x480, so splash.jpg is the one worth
+# replacing: a 4:3 image fills the screen instead of sitting letterboxed. The
+# port ships a 1440x1080 one.
 export ICERAGE_ASSET_OVERRIDE="$GAMEDIR/assets"
 mkdir -p "$ICERAGE_ASSET_OVERRIDE"
 mkdir -p "$ICERAGE_DATA_DIR"
@@ -243,11 +253,28 @@ fi
 # fixes that, but it is coreutils and this firmware may not carry it, so it is
 # used only if present. Never let a debugging aid decide whether the game
 # starts.
+#
+# Present is not the same as usable. stdbuf works by LD_PRELOADing
+# libstdbuf.so, and on this device that library is 64-bit while the port is
+# 32-bit, so the loader rejects it on every command it wraps:
+#
+#   ERROR: ld.so: object '/usr/libexec/coreutils/libstdbuf.so' from LD_PRELOAD
+#   cannot be preloaded (wrong ELF class: ELFCLASS64): ignored.
+#
+# It says "ignored" and the command still runs, so nothing breaks - but the
+# buffering stays unfixed and the message lands at the top of the log looking
+# like a real fault. Running stdbuf once and checking whether it complains is
+# cheaper and more portable than reading the ELF class ourselves.
+USE_STDBUF=""
 if command -v stdbuf >/dev/null 2>&1; then
-  stdbuf -o0 -e0 $TASKSET "$GAMEDIR/icerage" "$GAMEDIR/icerage.apk"
-else
-  $TASKSET "$GAMEDIR/icerage" "$GAMEDIR/icerage.apk"
+  if [ -z "$(stdbuf -o0 true 2>&1)" ]; then
+    USE_STDBUF="stdbuf -o0 -e0"
+  else
+    echo "stdbuf: present but not usable from a 32-bit process, skipping it"
+  fi
 fi
+
+$USE_STDBUF $TASKSET "$GAMEDIR/icerage" "$GAMEDIR/icerage.apk"
 
 $ESUDO kill -9 "$(pidof gptokeyb)" 2>/dev/null
 rm -rf /tmp/icerage-gl
