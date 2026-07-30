@@ -20,6 +20,11 @@
 #define RELOCATION_GROUPED_BY_ADDEND_FLAG       4
 #define RELOCATION_GROUP_HAS_ADDEND_FLAG        8
 
+/* The ARM unwind segment. Processor-specific, so a generic elf.h omits it. */
+#ifndef PT_ARM_EXIDX
+#define PT_ARM_EXIDX 0x70000001
+#endif
+
 #include "platform.h"
 
 #ifdef __cplusplus
@@ -62,6 +67,15 @@ typedef struct so_module {
   uintptr_t patch_base, patch_head, cave_base, cave_head, text_base, data_base[MAX_DATA_SEG];
   size_t patch_size, cave_size, text_size, data_size[MAX_DATA_SEG];
   int n_data;
+
+  // PT_ARM_EXIDX, resolved to where it actually landed in memory. Recorded
+  // here because the pointers below (ehdr/phdr/shdr/shstr) point into the
+  // temporary file buffer, which so_load_module() frees the moment the module
+  // is mapped - so nothing outside so_load() may read the headers again. The
+  // ARM unwinder needs this table at throw time, long after that. Zero when
+  // the module has no unwind segment.
+  uintptr_t arm_exidx;
+  size_t arm_exidx_size;
 
   Elf_Addr base;
 

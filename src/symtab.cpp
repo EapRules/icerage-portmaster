@@ -28,6 +28,7 @@ extern DynLibFunction symtable_time[];      /* src/symtab_time.cpp          */
 extern DynLibFunction symtable_pthread[];   /* src/symtab_pthread.cpp       */
 extern DynLibFunction symtable_stat[];      /* src/symtab_stat.cpp          */
 extern DynLibFunction symtable_glprobe[];   /* src/symtab_glprobe.cpp       */
+extern DynLibFunction symtable_unwind[];    /* src/symtab_unwind.cpp        */
 
 /*
  * libandroid.so — the 42 symbols the game actually imports, implemented in
@@ -131,6 +132,9 @@ DynLibFunction *so_dynamic_libraries[] = {
     symtable_time,
     symtable_pthread,
     symtable_stat,
+    /* Shadows the host libgcc's __gnu_Unwind_Find_exidx, which cannot see a
+     * module this loader mapped; must therefore come before symtable_libc. */
+    symtable_unwind,
     symtable_android,
     symtable_log,
     symtable_egl,

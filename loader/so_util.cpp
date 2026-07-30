@@ -195,6 +195,17 @@ static so_module *so_load(void *so_data, uintptr_t load_addr, size_t sz) {
     }
   }
 
+  // Remember where the unwind table landed, while the headers are still alive.
+  // Only PT_LOAD entries were rebased above, so this one still carries its
+  // link-time address and the same load_addr - min_vaddr shift applies.
+  for (int i = 0; i < mod->ehdr->e_phnum; i++) {
+    if (mod->phdr[i].p_type == PT_ARM_EXIDX) {
+      mod->arm_exidx = load_addr + mod->phdr[i].p_vaddr - min_vaddr;
+      mod->arm_exidx_size = mod->phdr[i].p_memsz;
+      break;
+    }
+  }
+
   // Start by setting the cave to go from ".text" to the end of the mapped
   // virtual memory region
   cave_base = mod->text_base + mod->text_size;
