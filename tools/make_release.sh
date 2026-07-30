@@ -42,11 +42,15 @@ cp ports/icerage/gameinfo.xml    "$STAGE/icerage/"
 cp ports/icerage/cover.png       "$STAGE/icerage/"
 cp ports/icerage/screenshot.png  "$STAGE/icerage/"
 cp ports/icerage/README.md       "$STAGE/icerage/"
+# Travels with the port so a screenshot can be taken from the device itself:
+# PortMaster's own tool uses kmsgrab, which needs CAP_SYS_ADMIN that a port
+# launcher does not have. Reading /dev/fb0 needs no privileges.
+cp ports/icerage/grab_screen.sh  "$STAGE/icerage/"
 cp -R ports/icerage/licenses     "$STAGE/icerage/"
 cp -R build/libs.armhf             "$STAGE/icerage/"
 cp -R ports/icerage/assets       "$STAGE/icerage/"
 
-chmod +x "$STAGE/Ice Rage.sh" "$STAGE/icerage/icerage"
+chmod +x "$STAGE/Ice Rage.sh" "$STAGE/icerage/icerage" "$STAGE/icerage/grab_screen.sh"
 
 # macOS sprinkles ._* resource forks over anything it touches, and they end up
 # in the zip looking like broken duplicates of every file.
