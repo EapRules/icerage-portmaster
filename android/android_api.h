@@ -144,6 +144,12 @@ float   AMotionEvent_getHistoricalX(const AInputEvent *motion_event,
                                     size_t pointer_index, size_t history_pos);
 float   AMotionEvent_getHistoricalY(const AInputEvent *motion_event,
                                     size_t pointer_index, size_t history_pos);
+/* Resolved by the game through dlsym rather than the PLT - see the definition
+ * in android/platform.cpp for why, and for what happens when they are absent. */
+float   AMotionEvent_getAxisValue(const AInputEvent *motion_event, int32_t axis,
+                                  size_t pointer_index);
+float   AMotionEvent_getHistoricalAxisValue(const AInputEvent *motion_event, int32_t axis,
+                                            size_t pointer_index, size_t history_pos);
 
 int32_t AInputQueue_getEvent(AInputQueue *queue, AInputEvent **outEvent);
 int32_t AInputQueue_preDispatchEvent(AInputQueue *queue, AInputEvent *event);

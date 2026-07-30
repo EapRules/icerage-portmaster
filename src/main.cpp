@@ -170,6 +170,19 @@ static int report_unresolved_symbols(so_module *mod)
 
 int main(int argc, char **argv)
 {
+    /*
+     * Unbuffered from the first line, because the log is the only diagnostic
+     * that leaves the console and a crash must not take it with it.
+     *
+     * Doing it here rather than with stdbuf is the difference between working
+     * and not: stdbuf injects a 64-bit libstdbuf.so via LD_PRELOAD, which a
+     * 32-bit process like this one cannot load at all. The launcher checks for
+     * that now, but relying on an external tool for something this important
+     * was the wrong shape - the program can simply ask for it itself.
+     */
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+
     if (argc < 2) {
         fprintf(stderr,
                 "usage: %s <icerage.apk>\n"

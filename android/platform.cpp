@@ -24,6 +24,7 @@
 enum {
     AKEYCODE_BACK          = 4,
     AKEYCODE_DPAD_UP       = 19,
+    AKEYCODE_MENU          = 82,
     AKEYCODE_DPAD_DOWN     = 20,
     AKEYCODE_DPAD_LEFT     = 21,
     AKEYCODE_DPAD_RIGHT    = 22,
@@ -47,6 +48,26 @@ enum {
  * ------------------------------------------------------------------ */
 #define MAX_POINTERS 4
 
+/*
+ * The axis numbers from android/input.h. They are not sequential with X and Y
+ * because the list grew over several API levels, and the game indexes a table
+ * by them, so the gaps have to be preserved.
+ *
+ * MAX_AXIS is 48 in Android; sizing the array to the highest one this port
+ * ever fills keeps the event struct small, and getAxisValue() range-checks.
+ */
+enum {
+    AMOTION_EVENT_AXIS_X        = 0,
+    AMOTION_EVENT_AXIS_Y        = 1,
+    AMOTION_EVENT_AXIS_Z        = 11,
+    AMOTION_EVENT_AXIS_RZ       = 14,
+    AMOTION_EVENT_AXIS_HAT_X    = 15,
+    AMOTION_EVENT_AXIS_HAT_Y    = 16,
+    AMOTION_EVENT_AXIS_LTRIGGER = 17,
+    AMOTION_EVENT_AXIS_RTRIGGER = 18,
+    AMOTION_EVENT_MAX_AXIS      = 19,
+};
+
 struct AInputEvent {
     int32_t type;
     int32_t source;
@@ -61,6 +82,10 @@ struct AInputEvent {
     int32_t pointerId[MAX_POINTERS];
     float   x[MAX_POINTERS];
     float   y[MAX_POINTERS];
+    /* Every other axis, indexed by its AMOTION_EVENT_AXIS_* number. A real
+     * joystick MotionEvent carries all of its axes at once, not one per
+     * event, so they travel together here too. */
+    float   axis[AMOTION_EVENT_MAX_AXIS];
 };
 
 struct AInputQueue {
@@ -152,43 +177,58 @@ static void push_key(int32_t keyCode, bool down)
 }
 
 /*
- * Two ways to speak to this game, selected by ICERAGE_INPUT.
+ * Two ways to speak to this game, selected by ICERAGE_INPUT. Joystick is the
+ * default, and the device settled which one is right.
  *
  * "touch" synthesises fingers: the port pretends to be a thumb on each half of
- * the screen. That is what a touch-only game needs, and it is what this port
- * did from the start.
+ * the screen. It is what this port did from the start, inherited from Minigore
+ * 2, and on this build it cannot work at all. The APK is the OUYA release -
+ * a console with no touchscreen - and the engine rejects touch outright:
  *
- * "joystick" talks to the game as a controller. Reviews say Ice Rage has
- * full controller support, and the binary backs it: it imports
- * AInputEvent_getSource, so it asks where every event came from rather than
- * assuming everything is a finger. A joystick MotionEvent carries the stick on
- * AXIS_X/AXIS_Y, which is exactly what AMotionEvent_getX/getY return for that
- * source - and getX/getY are imported while getAxisValue is not, so this is
- * the only axis API the game could be using.
+ *     [W/native-activity] WARNING: Unknown input source (4098)!
  *
- * With auto-aim on, the game turns its firing stick into a button, so walking
- * on the stick plus a fire button is the whole scheme.
+ * 4098 is 0x1002, AINPUT_SOURCE_TOUCHSCREEN. Every synthetic finger was
+ * discarded, which is why the on-screen cursor moved (this port draws it) but
+ * nothing could ever be selected with it.
+ *
+ * "joystick" talks to the game as a controller, which is what this build was
+ * made for. See AMotionEvent_getAxisValue() for how it reads the sticks - the
+ * answer is not the obvious one, and getting it wrong killed the process.
  */
 static bool input_is_joystick(void)
 {
     static int mode = -1;
     if (mode < 0) {
         const char *env = getenv("ICERAGE_INPUT");
-        mode = (env && strcmp(env, "joystick") == 0) ? 1 : 0;
+        mode = (env && strcmp(env, "touch") == 0) ? 0 : 1;
         SDL_Log("input mode: %s", mode ? "joystick (native controller)" : "touch (synthetic fingers)");
     }
     return mode == 1;
 }
 
-/* A joystick event: one "pointer" whose x/y are the axis values, -1..1. */
+/*
+ * The current position of every joystick axis.
+ *
+ * On Android a joystick MotionEvent is a snapshot of the whole device: all
+ * axes at once, not one event per axis. SDL reports them one at a time, so the
+ * live values are kept here and every event carries the complete set. A game
+ * that reads an axis this port never touched then gets a resting 0 rather than
+ * whatever the last event happened to leave behind.
+ */
+static float g_axis[AMOTION_EVENT_MAX_AXIS];
+
 static void push_joystick(float x, float y)
 {
+    g_axis[AMOTION_EVENT_AXIS_X] = x;
+    g_axis[AMOTION_EVENT_AXIS_Y] = y;
+
     AInputEvent *ev = new_event(AINPUT_EVENT_TYPE_MOTION, AINPUT_SOURCE_JOYSTICK);
     ev->action       = AMOTION_EVENT_ACTION_MOVE;
     ev->pointerCount = 1;
     ev->pointerId[0] = 0;
     ev->x[0]         = x;
     ev->y[0]         = y;
+    memcpy(ev->axis, g_axis, sizeof(ev->axis));
     android_platform_queue()->pending.push_back(ev);
 }
 
@@ -203,15 +243,61 @@ static void push_motion(int32_t action, float x, float y, int32_t pointerId)
     android_platform_queue()->pending.push_back(ev);
 }
 
+/*
+ * Which SDL button carries the letter the player sees. SDL names the face
+ * buttons by position - its "A" is always the bottom one - while these
+ * handhelds are silkscreened Nintendo style, with A on the right. Defined here
+ * rather than next to face_layout_init() because map_button() needs them.
+ * ICERAGE_FACE_LAYOUT=xbox switches them for a handheld lettered the other way.
+ */
+static uint8_t g_fire_pad_button   = SDL_CONTROLLER_BUTTON_B;
+static uint8_t g_cursor_pad_button = SDL_CONTROLLER_BUTTON_A;
+
+static bool face_keys_are_legacy(void);
+
 static int32_t map_button(int button)
 {
     switch (button) {
-    case SDL_CONTROLLER_BUTTON_A:             return AKEYCODE_BUTTON_A;
-    /* B is deliberately unmapped: as a gamepad key the engine took it as
-     * something else entirely. Nothing is better than wrong. */
+    /*
+     * The two face buttons, by silkscreen rather than by SDL's position.
+     *
+     * In touch mode these are the fire and cursor-tap buttons and never became
+     * gamepad keys - B was left unmapped on purpose, because in Minigore 2 the
+     * engine read it as something else entirely.
+     *
+     * In joystick mode that leaves the handheld's main button doing nothing,
+     * which is exactly what the device showed: menus could only be accepted
+     * with R1. So here the button a player reads as "A" sends BUTTON_A and the
+     * one they read as "B" sends BUTTON_B, which is what a controller-era
+     * build like this OUYA one expects. ICERAGE_FACE_KEYS=legacy restores the
+     * old behaviour if some menu turns out to disagree.
+     */
+    case SDL_CONTROLLER_BUTTON_A:
+    case SDL_CONTROLLER_BUTTON_B:
+        if (!input_is_joystick() || face_keys_are_legacy())
+            return (button == SDL_CONTROLLER_BUTTON_A) ? AKEYCODE_BUTTON_A : 0;
+        return (button == g_fire_pad_button) ? AKEYCODE_BUTTON_A : AKEYCODE_BUTTON_B;
+
     case SDL_CONTROLLER_BUTTON_X:             return AKEYCODE_BUTTON_X;
     case SDL_CONTROLLER_BUTTON_Y:             return AKEYCODE_BUTTON_Y;
-    case SDL_CONTROLLER_BUTTON_START:         return AKEYCODE_BACK;
+    /*
+     * Start opens the game's menu, and the keycode for that is MENU, not BACK.
+     *
+     * BACK is the Android convention and it is what this port sent at first,
+     * but pressing Start did nothing at all. The engine's key handler is a
+     * jump table, not a chain of comparisons, which is why grepping the
+     * disassembly for the constant finds nothing:
+     *
+     *     34444: sub  r4, r4, #19          ; keycode - 19
+     *     34448: cmp  r4, #88              ; in range 19..107?
+     *     3444c: addls pc, pc, r4, lsl #2  ; dispatch
+     *     34450: b    <default>            ; everything else, silently
+     *
+     * BACK is 4, below the table, so it fell straight through to the default
+     * case. MENU is 82, index 63, and has a real entry. BUTTON_START (108) is
+     * one past the end of the table, so it would have been just as dead.
+     */
+    case SDL_CONTROLLER_BUTTON_START:         return AKEYCODE_MENU;
     case SDL_CONTROLLER_BUTTON_BACK:          return AKEYCODE_BUTTON_SELECT;
     case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  return AKEYCODE_BUTTON_L1;
     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return AKEYCODE_BUTTON_R1;
@@ -305,8 +391,16 @@ static int16_t g_aim_x = 0, g_aim_y = 0;
  * because that is what these devices ship with; ICERAGE_FACE_LAYOUT=xbox
  * switches to the other one for a handheld whose A really is at the bottom.
  */
-static uint8_t g_fire_pad_button   = SDL_CONTROLLER_BUTTON_B;
-static uint8_t g_cursor_pad_button = SDL_CONTROLLER_BUTTON_A;
+/* Escape hatch for the face-key mapping above, in case a menu disagrees. */
+static bool face_keys_are_legacy(void)
+{
+    static int legacy = -1;
+    if (legacy < 0) {
+        const char *env = getenv("ICERAGE_FACE_KEYS");
+        legacy = (env && strcmp(env, "legacy") == 0) ? 1 : 0;
+    }
+    return legacy == 1;
+}
 
 static void face_layout_init(void)
 {
@@ -323,15 +417,24 @@ static void face_layout_init(void)
 static void update_stick(VirtualStick *st, int16_t sx, int16_t sy)
 {
     if (input_is_joystick()) {
-        /* Only the movement stick maps to an axis: with auto-aim on the game
-         * fires from a button, and a joystick event carries one stick. */
+        bool  dead = (abs(sx) <= STICK_DEADZONE && abs(sy) <= STICK_DEADZONE);
+        float fx   = dead ? 0.0f : sx / 32767.0f;
+        float fy   = dead ? 0.0f : sy / 32767.0f;
+
         if (st == &g_move) {
-            bool dead = (abs(sx) <= STICK_DEADZONE && abs(sy) <= STICK_DEADZONE);
-            push_joystick(dead ? 0.0f : sx / 32767.0f,
-                          dead ? 0.0f : sy / 32767.0f);
-            if (!dead)
-                cursor_dismiss();
+            push_joystick(fx, fy);
+        } else {
+            /* Android puts a second stick on Z/RZ, so that is where the aiming
+             * one goes. Auto-aim means the game may never read it, which is
+             * exactly why it costs nothing to send: the event already carries
+             * every axis, and a game that does read it now finds it. */
+            g_axis[AMOTION_EVENT_AXIS_Z]  = fx;
+            g_axis[AMOTION_EVENT_AXIS_RZ] = fy;
+            push_joystick(g_axis[AMOTION_EVENT_AXIS_X], g_axis[AMOTION_EVENT_AXIS_Y]);
         }
+
+        if (!dead)
+            cursor_dismiss();
         return;
     }
 
@@ -716,8 +819,10 @@ extern "C" bool android_platform_pump(void)
 
         case SDL_KEYDOWN:
         case SDL_KEYUP:
+            /* MENU rather than BACK for the same reason as Start: this engine's
+             * key table starts at 19, so BACK never reaches anything. */
             if (e.key.keysym.sym == SDLK_ESCAPE)
-                push_key(AKEYCODE_BACK, e.type == SDL_KEYDOWN);
+                push_key(AKEYCODE_MENU, e.type == SDL_KEYDOWN);
             break;
 
         default:
@@ -966,6 +1071,53 @@ extern "C" float AMotionEvent_getY(const AInputEvent *e, size_t idx)
     return (e && idx < e->pointerCount) ? e->y[idx] : 0.0f;
 }
 
+/*
+ * The accessor whose absence killed the process.
+ *
+ * It is not in the game's PLT, so reading the import table says the game never
+ * calls it - the conclusion this port shipped with, and it was wrong. The name
+ * is in the binary as a string, and so is dlsym: getAxisValue arrived in API 9
+ * and getHistoricalAxisValue in API 13, later than the minimum this 2013 build
+ * targets, so the engine looks them up at runtime and caches the pointers in a
+ * table. That is the ordinary NDK pattern for an API that might be missing.
+ *
+ * Our dlsym answers out of the same symbol tables the loader links against, so
+ * a name absent from them silently returns NULL - and the game does not check.
+ * The first time a stick moved:
+ *
+ *     34324: cmp  r8, r3        ; is this event AINPUT_SOURCE_JOYSTICK?
+ *     34330: ldr  r3, [r6, #4]  ; the cached getAxisValue pointer
+ *     3433c: blx  r3            ; NULL. pc = 0, SIGSEGV.
+ *
+ * Registering these two in symtable_android is the whole fix: dlsym finds
+ * them, the table holds real pointers, and the call lands somewhere.
+ *
+ * X and Y defer to the pointer-indexed arrays so that a touch event - where
+ * each finger has its own coordinates - keeps answering per pointer. Every
+ * other axis belongs to the device as a whole, so the pointer index only has
+ * to be in range.
+ */
+extern "C" float AMotionEvent_getAxisValue(const AInputEvent *e, int32_t axis, size_t idx)
+{
+    /* ICERAGE_INPUTTRACE=1 records which axes the game actually asks for. An
+     * axis this port does not fill answers a resting 0, which is safe but is
+     * also indistinguishable from "the stick is centred" - so when input
+     * behaves oddly, this says whether the question was even understood. */
+    if (getenv("ICERAGE_INPUTTRACE"))
+        trace("getAxisValue(axis=%d, idx=%u) source=%d",
+              axis, (unsigned)idx, e ? e->source : -1);
+
+    if (!e)
+        return 0.0f;
+    if (axis == AMOTION_EVENT_AXIS_X)
+        return AMotionEvent_getX(e, idx);
+    if (axis == AMOTION_EVENT_AXIS_Y)
+        return AMotionEvent_getY(e, idx);
+    if (axis < 0 || axis >= AMOTION_EVENT_MAX_AXIS || idx >= e->pointerCount)
+        return 0.0f;
+    return e->axis[axis];
+}
+
 /* No historical samples are batched, so the history is always empty and the
  * "historical" accessors just return the current position. */
 extern "C" size_t AMotionEvent_getHistorySize(const AInputEvent *e)
@@ -984,6 +1136,13 @@ extern "C" float AMotionEvent_getHistoricalY(const AInputEvent *e, size_t idx, s
 {
     (void)pos;
     return AMotionEvent_getY(e, idx);
+}
+
+extern "C" float AMotionEvent_getHistoricalAxisValue(const AInputEvent *e, int32_t axis,
+                                                     size_t idx, size_t pos)
+{
+    (void)pos;
+    return AMotionEvent_getAxisValue(e, axis, idx);
 }
 
 /* ------------------------------------------------------------------ *

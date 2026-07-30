@@ -86,6 +86,13 @@ DynLibFunction symtable_android[] = {
     THUNK_DIRECT(AMotionEvent_getHistorySize),
     THUNK_DIRECT(AMotionEvent_getHistoricalX),
     THUNK_DIRECT(AMotionEvent_getHistoricalY),
+    /* Neither of these is in the game's PLT - it looks them up with dlsym,
+     * because they postdate the API level this 2013 build targets. They still
+     * have to be here: our dlsym answers out of these tables, and a miss
+     * returns NULL into a function pointer the game calls without checking.
+     * See AMotionEvent_getAxisValue() in android/platform.cpp. */
+    THUNK_DIRECT(AMotionEvent_getAxisValue),
+    THUNK_DIRECT(AMotionEvent_getHistoricalAxisValue),
     THUNK_DIRECT(AInputQueue_getEvent),
     THUNK_DIRECT(AInputQueue_preDispatchEvent),
     THUNK_DIRECT(AInputQueue_finishEvent),
