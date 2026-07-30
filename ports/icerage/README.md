@@ -1,13 +1,43 @@
 # Ice Rage — PortMaster port
 
-Twin-stick zombie shooter by Mountain Sheep (2012). This is **not an emulator**:
-the game's own Android native library is loaded and run directly on Linux/ARM
+Arcade ice hockey by Mountain Sheep (2012). This is **not an emulator**: the
+game's own Android native library is loaded and run directly on Linux/ARM
 through a NativeActivity loader, the same way GMLoader runs GameMaker games.
+
+## Status: it boots and plays its menus. It is not finished.
+
+Verified on real hardware: the game loads, renders on the Mali driver, plays its
+sound effects and reaches its menus. A full match has **not** been played
+through yet. Treat this as an early port, not a finished one — see *Known
+issues* at the bottom for what is still open.
+
+## Which APK — this one matters more than usual
+
+Get the **OUYA build** of **`net.mountainsheep.icerage`** — version **1.8**,
+October 2013.
+
+The Google Play build of this game is **touch-only, and this port cannot drive
+it.** That is not a limitation that can be worked around with a better button
+map: the engine in the controller build rejects touchscreen events outright,
+
+```
+[W/native-activity] WARNING: Unknown input source (4098)!
+```
+
+`4098` is `AINPUT_SOURCE_TOUCHSCREEN`. Feed it synthetic fingers and the menus
+simply never respond, no matter what you press. The OUYA build expects a
+controller, which is exactly what this handheld is.
+
+1. Get the APK.
+2. Rename it to **`icerage.apk`**.
+3. Put it in **`ports/icerage/icerage.apk`** in the same session in which you
+   drop the zip into `autoinstall/`, while the card is still in your computer.
+
+Nothing is downloaded and no game data ships in this zip.
 
 ## After installing: reboot, and stay out of Manage Ports
 
-Two things that make a working install look broken. Both cost hours to work out,
-so they go first:
+Two things that make a working install look broken:
 
 **The game does not appear in Ports until you reboot the console.** PortMaster
 installs it correctly and then says nothing: the autoinstall path never triggers
@@ -21,18 +51,6 @@ That turns a good install into an empty Ports menu, and it is a very easy thing
 to do twice while trying to fix the first one. To reinstall, drop the zip into
 `autoinstall/` again. *Uninstall* additionally deletes the port folder with
 **your APK inside it**.
-
-## You need to supply the game
-
-The port carries only the loader. The game itself is yours to provide:
-
-1. Get the Android APK for **`net.mountainsheep.iceragezombies`**, **version
-   1.28** — the last release, from May 2017. The game is no longer on Google Play.
-2. Rename it to **`icerage.apk`**.
-3. Put it in **`ports/icerage/icerage.apk`** in the same session in which you
-   drop the zip into `autoinstall/`, while the card is still in your computer.
-
-Nothing is downloaded and no game data ships in this zip.
 
 ## Requirements
 
@@ -48,59 +66,49 @@ only device it has run on.
 
 ## Controls
 
-This build of the game is touch-only: two virtual thumbs during play, and menus
-that are plain touch targets with no gamepad navigation at all. The port turns
-the pad into those touches.
+The port talks to the game as a controller, which is what the OUYA build
+expects. `ICERAGE_INPUT=touch` switches to synthetic fingers, and is kept only
+for experimenting with other builds of the game — on this one it does nothing
+useful.
 
 | Control | Does |
 |---|---|
-| Left stick | walk |
-| Right stick | aim by hand |
-| **A** (right-hand button), **R1** or **R2** | **fire** |
-| **D-pad** | **move the on-screen cursor** |
-| **B** (bottom button) | **tap where the cursor is** — menus only |
-| **Start** | **open the game's menu** (Android BACK) |
-| Select, L1, L2, X, Y | passed through as Android gamepad keys |
+| Left stick | skate |
+| Right stick | second axis pair, if the game asks for it |
+| **A** (right-hand button) | primary action — shoot, check, accept |
+| **B** (bottom button) | secondary action / back |
+| **L1**, **R1** | shoulder buttons — these work in the menus |
+| **Start** | open the game's own menu |
+| X, Y, L2, R2, stick clicks | passed through as Android gamepad keys |
+| Select | nothing — the engine has no entry for it |
 
-Fire sits on three controls because they suit different hands, and holding any
-of them keeps firing — releasing one while another is held does not stop it.
+The engine dispatches keys through a jump table covering Android keycodes 19 to
+107, so anything outside that range is discarded without a trace. That rules out
+`BACK` (4), `BUTTON_START` (108) and `BUTTON_SELECT` (109) — all three look like
+reasonable choices and none of them reach the game. Start therefore sends
+`MENU` (82), which does have an entry.
 
-The game ships with AUTO-AIM on, so the right stick is optional: it is not
-really aiming, it is saying "shoot", and a button says that better. The fire
-button and the right stick share one finger — the button decides whether it is
-down, the stick decides where it points. Hold fire alone and auto-aim picks the
-target; nudge the stick to aim by hand.
-
-**B does nothing while playing**, on purpose: a thumb resting on it must never
-poke the screen mid-fight.
-
-### If fire is on the wrong button
+### If the buttons feel wrong
 
 SDL names the face buttons by **position** — its "A" is always the bottom one —
 while handhelds letter them however they like. These devices are lettered
-Nintendo style, with A on the right, and the port assumes that.
-
-If your handheld is lettered Xbox style (A at the bottom), fire will land on the
-wrong button. Edit `Ice Rage.sh` and change one line:
+Nintendo style, with A on the right, and the port assumes that. If yours is
+lettered Xbox style (A at the bottom), edit `Ice Rage.sh`:
 
 ```sh
 export ICERAGE_FACE_LAYOUT="${ICERAGE_FACE_LAYOUT:-xbox}"
 ```
 
-Fire and the menu-tap swap places; nothing else changes.
+If a menu takes the face buttons in some other way entirely, there is a second
+escape hatch that restores an older, more conservative mapping:
 
-Sticks and cursor are separate modes and never overlap: touching a stick
-retires the cursor immediately, so a button press while playing can never poke
-the screen. The cursor also fades on its own after a few idle seconds.
+```sh
+export ICERAGE_FACE_KEYS="legacy"
+```
 
-The cursor is what gets you through the menus. It only appears once you move
-the d-pad, and it rides the d-pad rather than a stick so that both sticks stay
-free while playing. KMS/DRM has no hardware cursor, so the port draws it
-itself, over the game, just before each frame is presented.
-
-`icerage.gptk` leaves every button unbound on purpose. gptokeyb is present
-only so PortMaster's standard exit combination can close the game — binding
-buttons there would double every input.
+`icerage.gptk` leaves every button unbound on purpose. gptokeyb is present only
+so PortMaster's standard exit combination can close the game — binding buttons
+there would double every input.
 
 ## If it does not start
 
@@ -109,17 +117,27 @@ The port writes `ports/icerage/log.txt` on every run. Useful lines:
 | In the log | Meaning |
 |---|---|
 | `missing game file` on screen | the APK is not in place, see above |
+| `Unknown input source (4098)` | you are running the Play build, not the OUYA one |
 | `GL: no Mali blob found` | the port could not find 32-bit Mali libraries |
 | `unresolved symbol` | the loader is missing a shim; please report it |
-| `stopped presenting after N frames` | the game froze; N is useful, include it |
+| `FATAL: SIGSEGV` | include the whole block, the addresses are the useful part |
 
 ## Known issues
 
-- **The settings menu overlaps itself** — the game lays it out for 16:9 and the
-  panel is 4:3. Navigable, just ugly. Rendering to a 16:9 buffer was tried and
-  gives a black screen on Mali, so it was reverted.
-- Ads, in-app purchases, leaderboards and cloud saves are stubbed out. The game
-  behaves as if everything is unlocked and there is no network.
+- **The music is silent.** It is a compressed stream the platform is expected to
+  decode, and this port has no decoder yet. Sound effects work.
+- **A full match has not been played through.** Everything past the menus is
+  untested.
+- **The game asks for 1920x1080** on a 640x480 panel (`Setting custom
+  resolution`). It renders anyway, but the layout was not designed for this
+  aspect ratio.
+- **OUYA store integration is stubbed out** — purchases, receipts and the
+  player-account lookups return empty. The game behaves as if everything is
+  unlocked and there is no network. `getPlayerNumByDeviceId` is part of that
+  stub, so anything relying on per-controller player numbers is unverified.
+- A handful of cosmetic textures are missing from this build
+  (`WARNING: Texture not found: ...Santa_Hat.png`); they belong to content this
+  APK does not carry.
 
 ## Credits
 

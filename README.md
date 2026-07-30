@@ -11,6 +11,23 @@ loader, and the pieces of Android it asks for are implemented here by hand.
 
 Download the ready-to-use zip from the [Releases](../../releases) page.
 
+## Which APK — read this first
+
+You need the **OUYA build** of `net.mountainsheep.icerage`, version **1.8**
+(October 2013).
+
+The **Google Play build will not work**, and not for a reason any amount of
+button remapping can fix: it is touch-only, and the engine in the controller
+build rejects touchscreen events outright —
+
+```
+[W/native-activity] WARNING: Unknown input source (4098)!
+```
+
+`4098` is `AINPUT_SOURCE_TOUCHSCREEN`. Feed it synthetic fingers and the menus
+never respond no matter what you press. That cost a full round of testing to
+work out, so it is here rather than buried in a troubleshooting section.
+
 ## Install
 
 **Do not unzip this into `ports/` by hand.** PortMaster's own FAQ warns that
@@ -82,27 +99,26 @@ instead of dropping you back to the menu with no explanation.
 
 ## Controls
 
-The game is touch-only — two virtual thumbs in play, and menus with no gamepad
-navigation whatsoever. The port turns the pad into those touches.
+The OUYA build expects a controller, so the port hands it one — the pad goes
+through as a real gamepad, not as synthetic fingers.
 
 | Control | Does |
 |---|---|
-| Left stick | walk |
-| Right stick | aim by hand |
-| **A** (right-hand button), **R1** or **R2** | **fire** |
-| D-pad | move the on-screen cursor |
-| B (bottom button) | tap where the cursor is — menus only |
-| Start | the game's menu (Android BACK) |
+| Left stick | skate |
+| **A** (right-hand button) | shoot, check, accept |
+| **B** (bottom button) | secondary / back |
+| **L1**, **R1** | shoulder buttons, also act in the menus |
+| **Start** | the game's own menu |
+| X, Y, L2, R2, stick clicks | passed through as Android gamepad keys |
+| Select | nothing — the engine has no entry for it |
 
-The cursor is how you get through the menus. It appears when you move the
-d-pad, rides the d-pad so both sticks stay free, and fades after a few idle
-seconds. KMS/DRM has no hardware cursor, so the port draws it itself just
-before each frame is presented.
+That last row is not an omission. The engine dispatches keys through a jump
+table covering Android keycodes 19 to 107, so anything outside that range is
+discarded without a trace — which rules out `BACK` (4), `BUTTON_START` (108)
+and `BUTTON_SELECT` (109). All three look like the obvious choice for Start and
+none of them reach the game; it sends `MENU` (82) instead.
 
-Auto-aim is on by default, so the right stick is optional: hold **A** and the
-game picks the target.
-
-**If fire lands on the wrong button**, your handheld is lettered Xbox style
+**If the buttons land wrong**, your handheld is lettered Xbox style
 (A at the bottom) rather than Nintendo style (A on the right). SDL names buttons
 by position and the silkscreen disagrees, so set this in `Ice Rage.sh`:
 
@@ -177,10 +193,18 @@ the game draws anything.
 
 ## Known issues
 
-- **The settings menu overlaps itself** — the layout is 16:9 and the panel is
-  4:3. Navigable, just ugly.
-- Ads, in-app purchases, leaderboards and cloud saves are stubbed: the game
-  behaves as if everything is unlocked and there is no network.
+- **The music is silent.** It is a compressed stream the platform is expected to
+  decode, and this port has no decoder yet. Sound effects work.
+- **The game asks for 1920x1080** on a 640x480 panel. It renders anyway, but the
+  layout was not drawn for this aspect ratio. The port ships a 4:3 loading
+  screen because the game's own is 16:9 and sat letterboxed.
+- **OUYA store integration is stubbed** — purchases, receipts and the
+  player-account lookups return empty, so the game behaves as if everything is
+  unlocked and there is no network. `getPlayerNumByDeviceId` is part of that
+  stub, so anything relying on per-controller player numbers is unverified.
+- A few cosmetic textures are missing from this build of the game
+  (`Texture not found: ...Santa_Hat.png`); they belong to content the APK does
+  not carry.
 
 ## Credits and licence
 

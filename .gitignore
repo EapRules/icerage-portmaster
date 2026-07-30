@@ -2,7 +2,7 @@
 *.apk
 build/
 # The game's writable storage (savegames, caches). Created at runtime; the
-# port's .sh points MINIGORE_DATA_DIR at the PortMaster data directory.
+# port's .sh points ICERAGE_DATA_DIR at the PortMaster data directory.
 gamedata/
 harness/results/
 harness/control/*.armhf

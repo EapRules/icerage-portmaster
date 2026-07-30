@@ -3,16 +3,16 @@
 	<game>
 		<path>./Ice Rage.sh</path>
 		<name>Ice Rage</name>
-		<desc>Twin-stick zombie shooter by Mountain Sheep. John Gore and friends against endless waves of furries and zombies across five arenas.
+		<desc>Arcade ice hockey by Mountain Sheep. One-on-one matches with a skater and a goalie a side, played for slapshots and body checks rather than for the rulebook.
 
-This port runs the game's original Android native library directly on Linux through a NativeActivity loader, so no emulator is involved. You supply your own APK.
+This port runs the game's original Android native library directly on Linux through a NativeActivity loader, so no emulator is involved. You supply your own APK - the OUYA build, which is the one made for a controller.
 
-Left stick walks. A, R1 or R2 fire. The menus are touch-only in this build, so the d-pad moves an on-screen cursor and B taps with it.</desc>
-		<releasedate>20121206T000000</releasedate>
+Left stick skates, the face and shoulder buttons shoot and check.</desc>
+		<releasedate>20131008T000000</releasedate>
 		<developer>Mountain Sheep</developer>
 		<publisher>Mountain Sheep</publisher>
-		<genre>Shooter</genre>
-		<players>1</players>
+		<genre>Sports</genre>
+		<players>1-2</players>
 		<image>./icerage/cover.png</image>
 	</game>
 </gameList>
