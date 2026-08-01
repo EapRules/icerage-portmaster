@@ -11,6 +11,10 @@ loader, and the pieces of Android it asks for are implemented here by hand.
 
 Download the ready-to-use zip from the [Releases](../../releases) page.
 
+**How does a 2013 Android binary run natively on ARM Linux?** The loader,
+the hand-built Android surface, the runtime-`dlsym` trap and the
+verification method are documented in [`TECHNICAL.md`](TECHNICAL.md).
+
 ## Which APK — read this first
 
 You need the **OUYA build** of `net.mountainsheep.icerage`, version **1.8**
