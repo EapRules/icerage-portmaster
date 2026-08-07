@@ -80,6 +80,21 @@ static EGLint         g_error  = EGL_SUCCESS;
 static bool           g_current = false;
 
 /*
+ * The surface size the game is told about.
+ *
+ * This is where the engine actually learns how big its screen is: it asks
+ * eglQuerySurface, not ANativeWindow_getWidth - measured, by telling the two
+ * different numbers and watching which one came back as its glViewport. So
+ * this, and not the ANativeWindow, is the lever that decides the resolution
+ * the game lays itself out for.
+ *
+ * Zero means "report the real drawable", which is the native path and the
+ * default. The scaled path sets the loader's logical size here, and
+ * viewport_scale then maps that rectangle onto the panel.
+ */
+static int g_logical_w = 0, g_logical_h = 0;
+
+/*
  * Frames the game has presented.
  *
  * eglSwapBuffers is the only place a frame can be counted honestly: it is the
@@ -101,6 +116,14 @@ void android_egl_init(SDL_Window *window, SDL_GLContext gl)
 {
     g_window = window;
     g_gl     = gl;
+}
+
+/* Called by the loader when the game must be told a size other than the
+ * drawable's. Anything <= 0 restores the honest answer. */
+void android_egl_set_logical_size(int w, int h)
+{
+    g_logical_w = w > 0 ? w : 0;
+    g_logical_h = h > 0 ? h : 0;
 }
 
 EGLint eglGetError(void)
@@ -279,7 +302,12 @@ EGLBoolean eglQuerySurface(EGLDisplay dpy, EGLSurface surface,
         return fail(EGL_BAD_PARAMETER);
 
     int w = 0, h = 0;
-    SDL_GL_GetDrawableSize(g_window, &w, &h);
+    if (g_logical_w > 0 && g_logical_h > 0) {
+        w = g_logical_w;
+        h = g_logical_h;
+    } else {
+        SDL_GL_GetDrawableSize(g_window, &w, &h);
+    }
     switch (attribute) {
     case EGL_WIDTH:  *value = w; return EGL_TRUE;
     case EGL_HEIGHT: *value = h; return EGL_TRUE;
